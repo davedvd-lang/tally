@@ -14,6 +14,15 @@ API key gratuita de [TMDB](https://www.themoviedb.org/settings/api) (pestaña **
 buscador pasa a ser online y global, con carátulas, sinopsis en español y temporadas
 reales al añadir una serie. Tu biblioteca persiste en el dispositivo entre sesiones.
 
+**PWA instalable**: servida por HTTPS (por ejemplo GitHub Pages), la app se puede instalar
+en el móvil («Añadir a pantalla de inicio») y funciona sin conexión: el service worker
+cachea la app y las carátulas ya vistas. En **Stats** puedes exportar tu biblioteca a un
+archivo JSON e importarla en otro dispositivo — el mismo esquema de copia de seguridad
+que Tally.
+
+**Publicar en GitHub Pages**: activa Pages (Settings → Pages → Deploy from branch → main)
+y la app quedará en `https://<usuario>.github.io/<repo>/butaca/`.
+
 **Desarrollar**:
 
 ```bash

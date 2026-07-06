@@ -116,11 +116,14 @@ butaca/
 │   ├── main.jsx    ← montaje
 │   └── input.css   ← tema Tailwind v4 (@theme) + microinteracciones
 ├── build.mjs       ← esbuild + Tailwind CLI → un solo HTML sin dependencias de red
+├── pwa/            ← manifest, service worker e iconos (fuente); build.mjs los copia a la raíz
+├── manifest.webmanifest · sw.js · icon-*.png   ← activos PWA servibles
 └── package.json
 ```
 
 Ya implementado sobre el prototipo inicial: persistencia en `localStorage`, sinopsis en
 español, carátulas reales en tiempo de ejecución (TVmaze/iTunes, sin clave, con caché y
-degradado como placeholder/fallback offline) y búsqueda online global con API key de TMDB
-(temporadas y duraciones reales al añadir). Siguientes pasos naturales: exportar/importar
-JSON como en Tally y PWA (manifest + service worker) para instalarla en el móvil.
+degradado como placeholder/fallback offline), búsqueda online global con API key de TMDB
+(temporadas y duraciones reales al añadir), copia de seguridad exportar/importar JSON, y
+PWA instalable con funcionamiento offline (service worker: app shell red-primero,
+carátulas caché-primero, APIs siempre en directo).

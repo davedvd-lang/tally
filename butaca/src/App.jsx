@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check, ChevronRight, Clapperboard, Clock3, Film, Flame, Globe, Home, KeyRound,
-  Play, Plus, Popcorn, RotateCcw, Search, Sparkles, Star, Trash2, Tv, X,
+  Check, ChevronRight, Clapperboard, Clock3, Download, Film, Flame, Globe, Home,
+  KeyRound, Play, Plus, Popcorn, RotateCcw, Search, Sparkles, Star, Trash2, Tv,
+  Upload, X,
 } from "lucide-react";
 import { seedLibrary, catalog } from "./data.js";
 import {
@@ -595,8 +596,9 @@ function TabBar({ tab, onTab, onAdd }) {
 
 /* ---------- stats (mini) ---------- */
 
-function StatsView({ lib, tmdbKey, onSaveKey, onReset }) {
+function StatsView({ lib, tmdbKey, onSaveKey, onReset, onExport, onImport }) {
   const [draft, setDraft] = useState(tmdbKey);
+  const fileRef = useRef(null);
   const movies = lib.filter((i) => i.type === "movie");
   const series = lib.filter((i) => i.type === "series");
   const eps = series.reduce((n, s) => n + seriesProgress(s).seen, 0);
@@ -644,6 +646,42 @@ function StatsView({ lib, tmdbKey, onSaveKey, onReset }) {
           </button>
         </div>
         {tmdbKey && <p className="mt-2 text-xs font-semibold text-mint">✓ Conectado a TMDB</p>}
+      </div>
+
+      <div className="mt-3 rounded-3xl bg-panel p-4 ring-1 ring-line">
+        <p className="flex items-center gap-2 text-sm font-bold text-snow">
+          <Download size={15} className="text-brass" /> Copia de seguridad
+        </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-fog">
+          Exporta tu biblioteca a un archivo JSON y guárdalo donde quieras. Importar
+          reemplaza la biblioteca actual por la del archivo.
+        </p>
+        <div className="mt-3 flex gap-2">
+          <button
+            onClick={onExport}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brass py-2.5 text-xs font-bold text-ink transition-transform active:scale-95"
+          >
+            <Download size={13} /> Exportar
+          </button>
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-panel2 py-2.5 text-xs font-bold text-snow ring-1 ring-line transition-transform active:scale-95"
+          >
+            <Upload size={13} /> Importar
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            aria-label="Importar copia de seguridad"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onImport(f);
+              e.target.value = "";
+            }}
+          />
+        </div>
       </div>
 
       <button
@@ -777,6 +815,43 @@ export default function App() {
     say("Datos de ejemplo restablecidos");
   };
 
+  const exportData = () => {
+    const payload = { app: "butaca", version: 1, exportedAt: new Date().toISOString(), library: lib };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `butaca-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    say("💾 Copia exportada");
+  };
+
+  const importData = async (file) => {
+    try {
+      const parsed = JSON.parse(await file.text());
+      const items = Array.isArray(parsed) ? parsed : parsed.library;
+      if (!Array.isArray(items)) throw new Error("formato");
+      const valid = items.filter(
+        (i) => i && typeof i.title === "string" &&
+          (i.type === "movie" || i.type === "series") && i.status in STATUS
+      );
+      if (valid.length === 0) throw new Error("vacío");
+      const imported = valid.map((i, idx) => ({
+        ...i,
+        id: idx + 1,
+        poster: i.poster || { from: "#3b4863", to: "#0b0e16", emoji: i.type === "series" ? "📺" : "🎬" },
+        seasons: i.type === "series"
+          ? (Array.isArray(i.seasons) && i.seasons.length ? i.seasons : [{ eps: 8, watched: 0 }])
+          : undefined,
+      }));
+      nextId = imported.length + 1;
+      setLib(imported);
+      say(`📥 ${imported.length} títulos importados`);
+    } catch {
+      say("⚠️ No se pudo leer el archivo");
+    }
+  };
+
   const remove = (item) => {
     setLib((L) => L.filter((i) => i.id !== item.id));
     setDetailId(null);
@@ -794,7 +869,10 @@ export default function App() {
         )}
         {tab === "movie" && <LibraryView lib={lib} type="movie" onOpen={setDetailId} onAdvance={advance} />}
         {tab === "series" && <LibraryView lib={lib} type="series" onOpen={setDetailId} onAdvance={advance} />}
-        {tab === "stats" && <StatsView lib={lib} tmdbKey={tmdbKey} onSaveKey={saveKey} onReset={resetData} />}
+        {tab === "stats" && (
+          <StatsView lib={lib} tmdbKey={tmdbKey} onSaveKey={saveKey} onReset={resetData}
+            onExport={exportData} onImport={importData} />
+        )}
       </main>
 
       <TabBar tab={tab} onTab={setTab} onAdd={() => setAddOpen(true)} />
