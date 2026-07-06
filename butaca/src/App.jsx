@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check, ChevronRight, Clapperboard, Clock3, Film, Flame, Home, Play, Plus,
-  Popcorn, Search, Sparkles, Star, Trash2, Tv, X,
+  Check, ChevronRight, Clapperboard, Clock3, Film, Flame, Globe, Home, KeyRound,
+  Play, Plus, Popcorn, RotateCcw, Search, Sparkles, Star, Trash2, Tv, X,
 } from "lucide-react";
 import { seedLibrary, catalog } from "./data.js";
+import {
+  enrichPosters, hydrateTmdbItem, loadPosterCache, loadTmdbKey, posterKey,
+  saveTmdbKey, searchTmdb,
+} from "./enrich.js";
 
 /* ---------- helpers de dominio ---------- */
 
@@ -39,13 +43,27 @@ function hoursWatched(lib) {
 
 /* ---------- átomos de UI ---------- */
 
+const PosterCtx = createContext({});
+
 function Poster({ item, className = "", emojiClass = "text-4xl" }) {
+  const cache = useContext(PosterCtx);
+  const [broken, setBroken] = useState(false);
+  const src = item.img || cache[posterKey(item)] || null;
   return (
     <div
       className={`relative flex items-center justify-center overflow-hidden ${className}`}
       style={{ background: `linear-gradient(160deg, ${item.poster.from} -20%, ${item.poster.to} 85%)` }}
     >
       <span className={`${emojiClass} drop-shadow-lg`} aria-hidden>{item.poster.emoji}</span>
+      {src && !broken && (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          onError={() => setBroken(true)}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(255,255,255,.14),transparent_55%)]" />
     </div>
   );
@@ -340,6 +358,10 @@ function DetailSheet({ item, onClose, onSetStatus, onSetEpisode, onAdvance, onRa
             {item.year} · {item.genre}{item.runtime ? ` · ${item.runtime} min` : ""}
           </p>
 
+          {item.synopsis && (
+            <p className="text-sm leading-relaxed text-fog">{item.synopsis}</p>
+          )}
+
           <Segmented
             value={item.status}
             onChange={(s) => onSetStatus(item, s)}
@@ -423,18 +445,29 @@ function DetailSheet({ item, onClose, onSetStatus, onSetEpisode, onAdvance, onRa
 
 /* ---------- añadir (buscador) ---------- */
 
-function AddSheet({ lib, onClose, onAdd }) {
+function AddSheet({ lib, tmdbKey, onClose, onAdd }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all");
+  const [online, setOnline] = useState(null); // null = sin búsqueda online activa
+  const [searching, setSearching] = useState(false);
   const inputRef = useRef(null);
   useEffect(() => inputRef.current?.focus(), []);
 
+  // Con API key de TMDB el buscador es online y global (debounce de 400 ms)
+  useEffect(() => {
+    if (!tmdbKey || q.trim().length < 2) { setOnline(null); setSearching(false); return; }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try { setOnline(await searchTmdb(q.trim(), tmdbKey)); }
+      catch { setOnline([]); }
+      setSearching(false);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [q, tmdbKey]);
+
   const inLib = (c) => lib.some((i) => i.title === c.title && i.type === c.type);
-  const results = catalog.filter(
-    (c) =>
-      (filter === "all" || c.type === filter) &&
-      c.title.toLowerCase().includes(q.trim().toLowerCase())
-  );
+  const pool = online ?? catalog.filter((c) => c.title.toLowerCase().includes(q.trim().toLowerCase()));
+  const results = pool.filter((c) => filter === "all" || c.type === filter);
 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center" role="dialog" aria-modal="true">
@@ -473,36 +506,51 @@ function AddSheet({ lib, onClose, onAdd }) {
         </div>
 
         <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-5 pb-8">
+          {searching && (
+            <p className="flex items-center justify-center gap-2 pt-2 text-xs font-semibold text-fog">
+              <Globe size={13} className="animate-spin text-brass" /> Buscando en TMDB…
+            </p>
+          )}
           {results.map((c) => {
             const added = inLib(c);
             return (
-              <div key={c.title} className="flex items-center gap-3 rounded-2xl bg-panel2 p-2.5 ring-1 ring-line">
-                <Poster item={c} className="h-14 w-11 shrink-0 rounded-xl" emojiClass="text-xl" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-snow">{c.title}</p>
-                  <p className="truncate text-xs text-fog">
-                    {c.type === "movie" ? "Película" : "Serie"} · {c.year} · {c.genre}
-                  </p>
-                </div>
-                {added ? (
-                  <span className="shrink-0 rounded-full bg-mint/10 px-2.5 py-1 text-[10px] font-bold text-mint ring-1 ring-mint/30">
-                    ✓ En tu lista
-                  </span>
-                ) : (
-                  <div className="flex shrink-0 gap-1.5">
-                    <button onClick={() => onAdd(c, "watchlist")} className="add-mini" aria-label={`Añadir ${c.title} a Por ver`}>
-                      <Clock3 size={14} /><span>Por ver</span>
-                    </button>
-                    <button onClick={() => onAdd(c, "watching")} className="add-mini" aria-label={`Añadir ${c.title} a Viendo`}>
-                      <Play size={14} /><span>Viendo</span>
-                    </button>
+              <div key={c.tmdbId || c.title} className="rounded-2xl bg-panel2 p-2.5 ring-1 ring-line">
+                <div className="flex items-center gap-3">
+                  <Poster item={c} className="h-16 w-12 shrink-0 rounded-xl" emojiClass="text-xl" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-snow">{c.title}</p>
+                    <p className="truncate text-xs text-fog">
+                      {c.type === "movie" ? "Película" : "Serie"}{c.year ? ` · ${c.year}` : ""}
+                    </p>
+                    {c.synopsis && (
+                      <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-fog/80">{c.synopsis}</p>
+                    )}
                   </div>
-                )}
+                  {added ? (
+                    <span className="shrink-0 rounded-full bg-mint/10 px-2.5 py-1 text-[10px] font-bold text-mint ring-1 ring-mint/30">
+                      ✓ En tu lista
+                    </span>
+                  ) : (
+                    <div className="flex shrink-0 flex-col gap-1.5">
+                      <button onClick={() => onAdd(c, "watchlist")} className="add-mini justify-center" aria-label={`Añadir ${c.title} a Por ver`}>
+                        <Clock3 size={14} /><span>Por ver</span>
+                      </button>
+                      <button onClick={() => onAdd(c, "watching")} className="add-mini justify-center" aria-label={`Añadir ${c.title} a Viendo`}>
+                        <Play size={14} /><span>Viendo</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
-          {results.length === 0 && (
+          {results.length === 0 && !searching && (
             <p className="pt-10 text-center text-sm text-fog">Sin resultados para «{q}» 🎬</p>
+          )}
+          {!tmdbKey && (
+            <p className="flex items-center justify-center gap-1.5 pt-3 text-center text-[11px] text-fog/70">
+              <KeyRound size={12} /> Conecta tu API key de TMDB en «Stats» para buscar cualquier título online
+            </p>
           )}
         </div>
       </div>
@@ -547,7 +595,8 @@ function TabBar({ tab, onTab, onAdd }) {
 
 /* ---------- stats (mini) ---------- */
 
-function StatsView({ lib }) {
+function StatsView({ lib, tmdbKey, onSaveKey, onReset }) {
+  const [draft, setDraft] = useState(tmdbKey);
   const movies = lib.filter((i) => i.type === "movie");
   const series = lib.filter((i) => i.type === "series");
   const eps = series.reduce((n, s) => n + seriesProgress(s).seen, 0);
@@ -571,8 +620,41 @@ function StatsView({ lib }) {
           </div>
         ))}
       </div>
-      <p className="mt-6 text-center text-xs text-fog/70">
-        Prototipo con datos locales · tus datos nunca salen del dispositivo
+      <div className="mt-6 rounded-3xl bg-panel p-4 ring-1 ring-line">
+        <p className="flex items-center gap-2 text-sm font-bold text-snow">
+          <Globe size={15} className="text-brass" /> Búsqueda online (TMDB)
+        </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-fog">
+          Con una API key gratuita de <span className="font-semibold text-snow">themoviedb.org</span> el
+          buscador encuentra cualquier título, con carátula y sinopsis en español. La clave se guarda
+          solo en tu dispositivo.
+        </p>
+        <div className="mt-3 flex gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Pega aquí tu API key…"
+            className="min-w-0 flex-1 rounded-xl bg-panel2 px-3 py-2.5 text-xs text-snow ring-1 ring-line outline-none placeholder:text-fog/50 focus:ring-brass/50"
+          />
+          <button
+            onClick={() => onSaveKey(draft.trim())}
+            className="flex shrink-0 items-center gap-1.5 rounded-xl bg-brass px-3.5 text-xs font-bold text-ink transition-transform active:scale-95"
+          >
+            <KeyRound size={13} /> Guardar
+          </button>
+        </div>
+        {tmdbKey && <p className="mt-2 text-xs font-semibold text-mint">✓ Conectado a TMDB</p>}
+      </div>
+
+      <button
+        onClick={onReset}
+        className="mx-auto mt-6 flex items-center gap-1.5 text-xs font-semibold text-fog/70 transition-colors hover:text-red-400"
+      >
+        <RotateCcw size={13} /> Restablecer datos de ejemplo
+      </button>
+
+      <p className="mt-4 text-center text-xs text-fog/70">
+        Tu biblioteca se guarda en este dispositivo · nunca sale de él
       </p>
     </div>
   );
@@ -582,13 +664,40 @@ function StatsView({ lib }) {
 
 let nextId = 1000;
 
+const LIB_KEY = "butaca:lib:v1";
+
+function loadLibrary() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LIB_KEY));
+    if (Array.isArray(saved) && saved.length) {
+      nextId = Math.max(nextId, ...saved.map((i) => i.id)) + 1;
+      return saved;
+    }
+  } catch { /* datos corruptos: arrancamos de cero */ }
+  return seedLibrary;
+}
+
 export default function App() {
-  const [lib, setLib] = useState(seedLibrary);
+  const [lib, setLib] = useState(loadLibrary);
   const [tab, setTab] = useState("home");
   const [detailId, setDetailId] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const [posters, setPosters] = useState(loadPosterCache);
+  const [tmdbKey, setTmdbKey] = useState(loadTmdbKey);
   const toastTimer = useRef(null);
+
+  // La biblioteca vive solo en tu dispositivo
+  useEffect(() => {
+    try { localStorage.setItem(LIB_KEY, JSON.stringify(lib)); } catch { /* sin hueco */ }
+  }, [lib]);
+
+  // Carátulas reales para lo que aún no tenga (TVmaze / iTunes / TMDB)
+  const missing = lib.filter((i) => !i.img && !(posterKey(i) in posters)).map(posterKey).join("|");
+  useEffect(() => {
+    if (missing) enrichPosters(lib, tmdbKey, setPosters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missing, tmdbKey]);
 
   const detail = useMemo(() => lib.find((i) => i.id === detailId) || null, [lib, detailId]);
 
@@ -644,9 +753,28 @@ export default function App() {
     say(`Movida a «${STATUS[status].label}»`);
   };
 
-  const addFromCatalog = (c, status) => {
-    setLib((L) => [{ ...c, id: ++nextId, status, poster: { ...c.poster } }, ...L]);
-    say(`＋ «${c.title}» en «${STATUS[status].label}»`);
+  const addFromCatalog = async (c, status) => {
+    let item = c;
+    if (c.tmdbId) {
+      // resultado online: traer temporadas/duración reales antes de guardar
+      try { item = await hydrateTmdbItem(c, tmdbKey); }
+      catch { /* si falla, se añade igualmente con lo que hay */ }
+      if (item.type === "series" && !item.seasons) item.seasons = [{ eps: 8, watched: 0 }];
+    }
+    setLib((L) => [{ ...item, id: ++nextId, status, poster: { ...item.poster } }, ...L]);
+    say(`＋ «${item.title}» en «${STATUS[status].label}»`);
+  };
+
+  const saveKey = (key) => {
+    saveTmdbKey(key);
+    setTmdbKey(key);
+    say(key ? "🔑 TMDB conectado" : "TMDB desconectado");
+  };
+
+  const resetData = () => {
+    try { localStorage.removeItem(LIB_KEY); } catch { /* nada */ }
+    setLib(seedLibrary);
+    say("Datos de ejemplo restablecidos");
   };
 
   const remove = (item) => {
@@ -656,6 +784,7 @@ export default function App() {
   };
 
   return (
+    <PosterCtx.Provider value={posters}>
     <div className="mx-auto flex min-h-dvh max-w-md flex-col bg-ink text-snow">
       <main className="flex-1">
         {tab === "home" && (
@@ -665,7 +794,7 @@ export default function App() {
         )}
         {tab === "movie" && <LibraryView lib={lib} type="movie" onOpen={setDetailId} onAdvance={advance} />}
         {tab === "series" && <LibraryView lib={lib} type="series" onOpen={setDetailId} onAdvance={advance} />}
-        {tab === "stats" && <StatsView lib={lib} />}
+        {tab === "stats" && <StatsView lib={lib} tmdbKey={tmdbKey} onSaveKey={saveKey} onReset={resetData} />}
       </main>
 
       <TabBar tab={tab} onTab={setTab} onAdd={() => setAddOpen(true)} />
@@ -681,7 +810,7 @@ export default function App() {
           onRemove={remove}
         />
       )}
-      {addOpen && <AddSheet lib={lib} onClose={() => setAddOpen(false)} onAdd={addFromCatalog} />}
+      {addOpen && <AddSheet lib={lib} tmdbKey={tmdbKey} onClose={() => setAddOpen(false)} onAdd={addFromCatalog} />}
 
       {toast && (
         <div key={toast.key} className="animate-toast pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-6">
@@ -691,5 +820,6 @@ export default function App() {
         </div>
       )}
     </div>
+    </PosterCtx.Provider>
   );
 }

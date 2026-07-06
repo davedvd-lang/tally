@@ -111,13 +111,16 @@ butaca/
 ├── index.html      ← prototipo compilado, autocontenido (ábrelo y listo)
 ├── src/
 │   ├── App.jsx     ← toda la UI y la lógica de estado (React 19)
-│   ├── data.js     ← biblioteca semilla + catálogo del buscador (mock)
+│   ├── data.js     ← biblioteca semilla + catálogo offline, con sinopsis en español
+│   ├── enrich.js   ← carátulas reales (TVmaze/iTunes sin clave) y búsqueda online TMDB
 │   ├── main.jsx    ← montaje
 │   └── input.css   ← tema Tailwind v4 (@theme) + microinteracciones
 ├── build.mjs       ← esbuild + Tailwind CLI → un solo HTML sin dependencias de red
 └── package.json
 ```
 
-Siguientes pasos naturales: persistencia en `localStorage` (1 `useEffect`), búsqueda real
-contra TMDB, exportar/importar JSON como en Tally, y PWA (manifest + service worker) para
-instalarla en el móvil.
+Ya implementado sobre el prototipo inicial: persistencia en `localStorage`, sinopsis en
+español, carátulas reales en tiempo de ejecución (TVmaze/iTunes, sin clave, con caché y
+degradado como placeholder/fallback offline) y búsqueda online global con API key de TMDB
+(temporadas y duraciones reales al añadir). Siguientes pasos naturales: exportar/importar
+JSON como en Tally y PWA (manifest + service worker) para instalarla en el móvil.
